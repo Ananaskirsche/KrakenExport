@@ -13,5 +13,6 @@ target_link_libraries(KrakenExport ${CMAKE_SOURCE_DIR}/include/libkraken/libkrak
 target_link_libraries(KrakenExport OpenSSL::Crypto)
 
 configure_file("kraken.key" "kraken.key" COPYONLY)
+configure_file("currencies.txt" "currencies.txt" COPYONLY)
 
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")

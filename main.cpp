@@ -14,6 +14,89 @@ extern "C" {
 using namespace rapidjson;
 using namespace std;
 
+
+/**
+ * Prüft, ob die kraken.key und currencies.txt existieren
+ * @return
+ */
+bool checkConfig(){
+    if(!std::filesystem::exists("kraken.key")){
+        printf("kraken.key does not exist!\n");
+        return false;
+    }
+
+    if(!std::filesystem::exists("currencies.txt")){
+        printf("currencies.txt does not exist!\n");
+        return false;
+    }
+
+    return true;
+}
+
+
+/**
+ * Schreibt alle Währungen aus der currencies.txt in eine forward_list
+ * @return
+ */
+forward_list<char*> getCurrencies(){
+
+    forward_list<char*> currenciesList;
+
+    FILE *fd = fopen("currencies.txt", "r");
+    if(fd == nullptr){
+        printf("Could not open currencies.txt!\n");
+        return currenciesList;
+    }
+
+    bool run = true;
+    int i = 0;
+    char* buffer = (char*) malloc(10 * sizeof(char));
+    char c = 'A';
+    while(run){
+        c = (char)fgetc(fd);
+        switch (c) {
+            case '\n':{
+                    //String Terminator an Buffer hinzufügen
+                    buffer[i] = '\0';
+                    i++;
+
+                    //Buffer in eine neue Variable kopieren
+                    char* currency = (char*) malloc(i * sizeof(char));
+                    strncpy(currency, buffer, i);
+                    currenciesList.push_front(currency);
+
+                    i = 0;
+                }
+                break;
+            case EOF:{
+                    //Prüfen, ob unser Puffer leer ist, wenn ja, können wir hier einfach aufhören
+                    if(i != 0){
+                        //String Terminator an Buffer hinzufügen
+                        buffer[i] = '\0';
+                        i++;
+
+                        //Buffer in eine neue Variable kopieren
+                        char* currency = (char*) malloc(i * sizeof(char));
+                        strncpy(currency, buffer, i);
+                        currenciesList.push_front(currency);
+                    }
+                    run = false;
+                }
+                break;
+            default:
+                buffer[i] = c;
+                i++;
+                break;
+        }
+    }
+
+    free(buffer);
+    fclose(fd);
+
+    return currenciesList;
+}
+
+
 /**
  * Holt den API-Key aus der kraken.key Datei
  * @return API-Key
@@ -168,12 +251,13 @@ char* getLastLedgerIDFromRecords(const char* currency){
 /**
  * Holt die Rewards mittels Kraken API
  * @param lastLedgerID Die ID die als letztes erfasst worden ist
+ * @param currency Die Währung für die neue Einträge geholt werden sollen
+ * @param api_key Kraken API Key
+ * @param secret_key Kraken Secret Key
  * @return Liste mit neuen Rewards
  */
-std::forward_list<Reward*> getRewards(char* lastLedgerID, const char* currency){
+std::forward_list<Reward*> getRewards(char* lastLedgerID, const char* currency, const char* api_key, const char* secret_key){
     struct kraken_api *kr_api = nullptr;
-    const char* api_key = getKrakenApiKey();
-    const char* secret_key = getKrakenSecretKey();
 
     kraken_init(&kr_api, api_key, secret_key);
 
@@ -242,8 +326,6 @@ std::forward_list<Reward*> getRewards(char* lastLedgerID, const char* currency){
     free(kr_api->s_result);
     kr_api->s_result = nullptr;
     kraken_clean(&kr_api);
-    free((void*)secret_key);
-    free((void*)api_key);
 
     return rewardList;
 }
@@ -270,26 +352,34 @@ int writeRewardsToFile(const forward_list<Reward*>& rewardList, const char* curr
 
 
 int main() {
-    char* lastDotLedgerID = getLastLedgerIDFromRecords("DOT.S");
-    std::forward_list<Reward*> newDotRewards = getRewards(lastDotLedgerID, "DOT.S");
-    writeRewardsToFile(newDotRewards, "DOT.S");
-
-    char* lastAtomLedgerID = getLastLedgerIDFromRecords("ATOM.S");
-    std::forward_list<Reward*> newAtomRewards = getRewards(lastAtomLedgerID, "ATOM.S");
-    writeRewardsToFile(newAtomRewards, "ATOM.S");
-
-    printf("Got %ld new DOT.S rewards!\n", std::distance(newDotRewards.begin(), newDotRewards.end()));
-    printf("Got %ld new ATOM.S rewards!\n", std::distance(newAtomRewards.begin(), newAtomRewards.end()));
-
-    for(Reward* reward : newDotRewards){
-        delete reward;
-    }
-    for(Reward* reward : newAtomRewards){
-        delete reward;
+    if(!checkConfig()){
+        return -1;
     }
 
-    free(lastDotLedgerID);
-    free(lastAtomLedgerID);
+    //Get Resources
+    char* apiKey = getKrakenApiKey();
+    char* secretKey = getKrakenSecretKey();
+    forward_list<char*> currencyList = getCurrencies();
+
+    for(char* currency : currencyList){
+        char* lastLedgerID = getLastLedgerIDFromRecords(currency);
+        std::forward_list<Reward*> newRewards = getRewards(lastLedgerID, currency, apiKey, secretKey);
+        writeRewardsToFile(newRewards, currency);
+
+        printf("Got %ld new %s rewards!\n", std::distance(newRewards.begin(), newRewards.end()), currency);
+
+        //Free/Delete Resources
+        if(lastLedgerID != nullptr){
+            free(lastLedgerID);
+        }
+        for(Reward* reward : newRewards){
+            delete reward;
+        }
+        free(currency);
+    }
+
+    free(apiKey);
+    free(secretKey);
 
     return 0;
 }
