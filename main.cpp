@@ -238,10 +238,13 @@ std::forward_list<Reward*> getRewards(char* lastLedgerID, const char* currency){
         rewardList.push_front(reward);
     }
 
-    //KrakenAPI deinitialisieren
+    //KrakenAPI deinitialisieren & Variablen freen
     free(kr_api->s_result);
     kr_api->s_result = nullptr;
     kraken_clean(&kr_api);
+    free((void*)secret_key);
+    free((void*)api_key);
+
     return rewardList;
 }
 
