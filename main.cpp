@@ -1,11 +1,11 @@
-#include "include/rapidjson/document.h"
-#include "include/rapidjson/rapidjson.h"
+#include "external/rapidjson/document.h"
+#include "external/rapidjson/rapidjson.h"
 #include <chrono>
 #include <filesystem>
 #include <forward_list>
 #include "Reward.h"
 extern "C" {
-    #include "include/libkraken/kraken_api.h"
+    #include "external/libkraken/kraken_api.h"
     #include <fcntl.h>
     #include <cstdio>
     #include <ctime>
