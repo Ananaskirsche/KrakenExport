@@ -79,8 +79,5 @@ fabric.properties
 cmake-build-debug
 cmake-build-release
 
-#Kdevelop
-*.kdev4
-
 #File which contains API key for Kraken
 kraken.key

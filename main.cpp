@@ -1,20 +1,18 @@
-#include <chrono>
-#include <string>
-#include <vector>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <ctime>
-
 #include "external/rapidjson/document.h"
 #include "external/rapidjson/rapidjson.h"
-
-#include "Reward.hpp"
-
-extern "C"
-{
+#include <chrono>
+#include <filesystem>
+#include <forward_list>
+#include "Reward.h"
+extern "C" {
     #include "external/libkraken/kraken_api.h"
+    #include <fcntl.h>
+    #include <cstdio>
+    #include <ctime>
 }
+
+using namespace rapidjson;
+using namespace std;
 
 
 /**
@@ -22,14 +20,12 @@ extern "C"
  * @return
  */
 bool checkConfig(){
-    if(!std::filesystem::exists("kraken.key"))
-    {
+    if(!std::filesystem::exists("kraken.key")){
         printf("kraken.key does not exist!\n");
         return false;
     }
 
-    if(!std::filesystem::exists("currencies.txt"))
-    {
+    if(!std::filesystem::exists("currencies.txt")){
         printf("currencies.txt does not exist!\n");
         return false;
     }
@@ -37,112 +33,217 @@ bool checkConfig(){
     return true;
 }
 
+
 /**
  * Schreibt alle Währungen aus der currencies.txt in eine forward_list
  * @return
  */
-std::vector<std::string> getCurrencies()
-{
-    std::vector<std::string> currenciesList;
-    std::ifstream ifs("currencies.txt", std::ios::in);
+forward_list<char*> getCurrencies(){
 
-    if (!ifs.is_open())
-    {
-        std::cout << "Could not open currencies.txt" << std::endl;
+    forward_list<char*> currenciesList;
+
+    FILE *fd = fopen("currencies.txt", "r");
+    if(fd == nullptr){
+        printf("Could not open currencies.txt!\n");
         return currenciesList;
     }
 
-    std::string line;
+    bool run = true;
+    int i = 0;
+    char* buffer = (char*) malloc(10 * sizeof(char));
+    char c = 'A';
+    while(run){
+        c = (char)fgetc(fd);
+        switch (c) {
+            case '\n':{
+                    //String Terminator an Buffer hinzufügen
+                    buffer[i] = '\0';
+                    i++;
 
-    while (std::getline(ifs, line))
-        currenciesList.push_back(line);
+                    //Buffer in eine neue Variable kopieren
+                    char* currency = (char*) malloc(i * sizeof(char));
+                    strncpy(currency, buffer, i);
+                    currenciesList.push_front(currency);
 
-    ifs.close();
+                    i = 0;
+                }
+                break;
+            case EOF:{
+                    //Prüfen, ob unser Puffer leer ist, wenn ja, können wir hier einfach aufhören
+                    if(i != 0){
+                        //String Terminator an Buffer hinzufügen
+                        buffer[i] = '\0';
+                        i++;
+
+                        //Buffer in eine neue Variable kopieren
+                        char* currency = (char*) malloc(i * sizeof(char));
+                        strncpy(currency, buffer, i);
+                        currenciesList.push_front(currency);
+                    }
+                    run = false;
+                }
+                break;
+            default:
+                buffer[i] = c;
+                i++;
+                break;
+        }
+    }
+
+    free(buffer);
+    fclose(fd);
 
     return currenciesList;
 }
+
 
 /**
  * Holt den API-Key aus der kraken.key Datei
  * @return API-Key
  */
-std::string getKrakenApiKey()
-{
-    std::ifstream ifs("kraken.key", std::ios::in);
-    std::string key;
-    std::getline(ifs, key);
-    ifs.close();
-    return key;
+char* getKrakenApiKey(){
+    FILE *fd = fopen("kraken.key", "r");
+    if(fd == nullptr){
+        printf("Could not open kraken.key!\n");
+        return nullptr;
+    }
+
+    char* api_key = (char*)malloc(58 * sizeof(char));
+
+    int i = 0;
+    char c;
+    while(true){
+        c = (char)fgetc(fd);
+        if(c == '\n' || c == EOF){
+            api_key[i] = '\0';
+            break;
+        }
+        api_key[i] = c;
+        i++;
+    }
+
+    fclose(fd);
+
+    return api_key;
 }
+
+
 
 /**
  * Holt den Secret-Key aus der kraken.key Datei
  * @return Secret Key
  */
-std::string getKrakenSecretKey()
-{
-    std::ifstream ifs("kraken.key", std::ios::in);
-    std::string key;
-    std::getline(ifs, key);
-    std::getline(ifs, key);
-    ifs.close();
-    return key;
+char* getKrakenSecretKey(){
+    FILE *fd = fopen("kraken.key", "r");
+    if(fd == nullptr){
+        printf("Could not open kraken.key!\n");
+        return nullptr;
+    }
+
+    //Erste Zeile lesen
+    char c = 'a';
+    while(c != '\n'){
+        c = (char) fgetc(fd);
+    }
+
+    //Zweite Zeile lesen und in secret_key schreiben
+    char* secret_key = (char*)malloc(90 * sizeof(char));
+    int i = 0;
+    while(true){
+        c = (char) fgetc(fd);
+        if(c == '\n' || c == EOF){
+            secret_key[i] = '\0';
+            break;
+        }
+        secret_key[i] = c;
+        i++;
+    }
+
+    fclose(fd);
+    return secret_key;
 }
 
-std::filesystem::path createFileNameOutOfCurrency(std::string const& currency)
-{
-    std::string filename = "staking_rewards_";
-    filename.append(currency);
-    filename.append(".csv");
-    return filename;
-}
+
 
 /**
  * Erstellt die CSV-Datei welche die Transaktionen enthalten soll
  * @return Fehlercode
  */
-int createCSVFile(std::filesystem::path currencyPath)
-{
-    std::ofstream ofs(currencyPath, std::ios::out);
+int createCSVFile(const char* currency){
+    char filename[30] = "staking_rewards_";
+    strcat(filename, currency);
+    strcat(filename, ".csv");
 
-    if (!ofs.is_open())
-    {
-        std::cout << "Could not create file " << currencyPath.string() << std::endl;
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+    int file = creat(filename, mode);
+
+    if(file == -1){
+        printf("Could not create file %s!", filename);
         return -1;
     }
 
-    ofs << "LedgerID; Timestamp; Asset; Amount; Balance" << '\n';
-    ofs.close();
+    //Header schreiben
+    FILE *fd = fopen(filename, "w");
+    if(fd == nullptr){
+        printf("Could not open file %s\n",filename);
+        return -1;
+    }
+    fprintf(fd, "LedgerID; Timestamp; Asset; Amount; Balance\n");
+    fclose(fd);
+
     return 0;
 }
 
-std::string getLastLedgerIDFromRecords(std::string const& currency)
-{
-    std::filesystem::path filename = createFileNameOutOfCurrency(currency);
 
-    if(!exists(filename))
-    {
-        createCSVFile(filename);
-        return {};
+/**
+ * Gibt den letzten eingetragenen Reward aus der CSV-Datei zurück
+ * @return NULL wenn noch kein Eintrag vorhanden ist, oder das Datum des letzten Eintrages
+ */
+char* getLastLedgerIDFromRecords(const char* currency){
+    char filename[30] = "staking_rewards_";
+    strcat(filename, currency);
+    strcat(filename, ".csv");
+
+    if(!std::filesystem::exists(filename)){
+        createCSVFile(currency);
+        return nullptr;
     }
 
-    std::ifstream ifs(filename, std::ios::in);
-
-    if (!ifs.is_open())
-    {
-        std::cout << "Could not open " << filename.string() << std::endl;
-        return {};
+    FILE *fd = fopen(filename, "r");
+    if(fd == nullptr){
+        printf("Could not open %s", filename);
+        return nullptr;
     }
 
-    std::string lastLedger;
-    std::string ledgerId, timestamp, asset, amount, balance;
+    int offset = 2;
+    char lastChar = 'a';
 
-    while (ifs >> ledgerId >> timestamp >> asset >> amount >> balance)
-        lastLedger = ledgerId;
+    //Schrittweise den offset erhöhen um vom Dateiende zum ersten \n zu gehen
+    while(lastChar != EOF){
+        fseek(fd, -offset, 2);
+        lastChar = (char)fgetc(fd);
+        if(lastChar == '\n'){
+            break;
+        }
+        offset++;
+    }
 
-    ifs.close();
+    //Nachdem der Offset gefunden worden ist, können wir bis zum ersten Semikolon die letzte LedgerID einlesen
+    char* lastLedger = (char*)malloc(20 * sizeof(char));
+    int i = 0;
+    char c;
+    while(true){
+        c = (char)fgetc(fd);
+        if(c == EOF || c == '\n' || c == ';') {
+            lastLedger[i] = '\0';
+            break;
+        }
+        lastLedger[i] = c;
+        i++;
+    }
 
-    lastLedger.substr(0, lastLedger.size() - 1);
+    fclose(fd);
+
     return lastLedger;
 }
 
@@ -155,19 +256,16 @@ std::string getLastLedgerIDFromRecords(std::string const& currency)
  * @param secret_key Kraken Secret Key
  * @return Liste mit neuen Rewards
  */
-std::vector<Reward> getRewards(std::string const& lastLedgerID, std::string const& currency, std::string const& api_key, std::string const& secret_key)
-{
+std::forward_list<Reward*> getRewards(char* lastLedgerID, const char* currency, const char* api_key, const char* secret_key){
     struct kraken_api *kr_api = nullptr;
 
-    kraken_init(&kr_api, api_key.data(), secret_key.data());
+    kraken_init(&kr_api, api_key, secret_key);
 
     //Parameter setzen
-    kraken_set_opt(&kr_api, "asset", currency.data());
+    kraken_set_opt(&kr_api, "asset", currency);
     kraken_set_opt(&kr_api, "type", "staking");
-
-    if(lastLedgerID != "")
-    {
-        kraken_set_opt(&kr_api, "start", lastLedgerID.data());
+    if(lastLedgerID != nullptr){
+        kraken_set_opt(&kr_api, "start", lastLedgerID);
     }
 
     //Abfrage an KrakenAPI stellen
@@ -175,105 +273,113 @@ std::vector<Reward> getRewards(std::string const& lastLedgerID, std::string cons
 
     //Ergebnis überprüfen
     if(kr_api->s_result == nullptr){
-        std::cout << "Error when calling Kraken API" << std::endl;
-        return std::vector<Reward>();
+        printf("Error when calling Kraken API\n");
+        return std::forward_list<Reward*>();
     }
 
-    //Get Krakenresult and clean krakenapi
-    std::string json = kr_api->s_result;
-    free(kr_api->s_result);
-    kr_api->s_result = nullptr;
-    kraken_clean(&kr_api);
-
-    rapidjson::Document doc;
-    doc.Parse(json.data());
+    Document doc;
+    char* json = kr_api->s_result;
+    doc.Parse(json);
 
     //JSON überprüfen
-    if (!doc.HasMember("result"))
-    {
-        std::cout  << "JSON has no member 'result'!" << std::endl;
-        return std::vector<Reward>();
+    if (!doc.HasMember("result")){
+        printf("JSON has no member 'result'!\n");
+        return std::forward_list<Reward*>();
     }
-    if (!doc.HasMember("error"))
-    {
-        std::cout << "JSON has no member 'error'!" << std::endl;
-        return std::vector<Reward>();
+    if (!doc.HasMember("error")){
+        printf("JSON has no member 'error'!\n");
+        return std::forward_list<Reward*>();
     }
-    if(!doc["error"].GetArray().Empty())
-    {
-        std::cout << "An error occured! " << '\n' << "JSON: " << json << std::endl;
-        return std::vector<Reward>();
+    if(!doc["error"].GetArray().Empty()){
+        printf("An error occured!\n JSON: %s", json);
+        return std::forward_list<Reward*>();
     }
 
     //JSON verarbeiten
-    rapidjson::GenericObject result = doc["result"].GetObject();
-    rapidjson::GenericObject ledger = result["ledger"].GetObject();
+    GenericObject result = doc["result"].GetObject();
+    GenericObject ledger = result["ledger"].GetObject();
 
-    std::vector<Reward> rewardList;
+    forward_list<Reward*> rewardList;
 
-    for(auto const& entry : ledger){
-        rapidjson::GenericObject body = entry.value.GetObject();
+    for(auto& entry : ledger){
+        GenericObject body = entry.value.GetObject();
 
-        std::string ledgerId = entry.name.GetString();
+        char* ledgerId = (char*)malloc(19*sizeof(char));
+        strcpy(ledgerId, entry.name.GetString());
 
-        Reward reward;
-        reward.ledgerId = ledgerId;
-        reward.asset = body["asset"].GetString();
-        reward.amount = body["amount"].GetString();
-        reward.balance = body["balance"].GetString();
+        Reward *reward = new Reward();
+        reward->ledgerId = ledgerId;
+        reward->asset = body["asset"].GetString();
+        reward->amount = body["amount"].GetString();
+        reward->balance = body["balance"].GetString();
 
-        std::string timeString;
+        char* timeString = (char*)malloc(20 * sizeof(char));
         const time_t time = body["time"].GetDouble();
         tm* tmo = gmtime(&time);
-        strftime(timeString.data(), 20*sizeof(char), "%Y-%m-%dT%H:%M:%S", tmo);
-        reward.time = timeString;
+        strftime(timeString, 20*sizeof(char), "%Y-%m-%dT%H:%M:%S", tmo);
+        reward->time = timeString;
 
-        rewardList.push_back(reward);
+        rewardList.push_front(reward);
     }
+
+    //KrakenAPI deinitialisieren & Variablen freen
+    free(kr_api->s_result);
+    kr_api->s_result = nullptr;
+    kraken_clean(&kr_api);
 
     return rewardList;
 }
 
 
-int writeRewardsToFile(std::vector<Reward> const& rewardList, std::string const& currency)
-{
-    std::filesystem::path filename = createFileNameOutOfCurrency(currency);
+int writeRewardsToFile(const forward_list<Reward*>& rewardList, const char* currency){
+    char filename[30] = "staking_rewards_";
+    strcat(filename, currency);
+    strcat(filename, ".csv");
 
-    std::ofstream ofs(filename, std::ios::out);
-
-    if (!ofs.is_open())
-    {
-        std::cout << "Could not open " << filename.string() << std::endl;
+    FILE *fd = fopen(filename, "a");
+    if(fd == nullptr){
         return -1;
     }
 
-    for(auto const& reward : rewardList)
-        ofs << reward.ledgerId << ";" << reward.time << ";" << reward.asset << ";" << reward.amount << ";" << reward.balance << '\n';
+    for(Reward *reward : rewardList){
+        fprintf(fd, "%s;%s;%s;%s;%s\n", reward->ledgerId, reward->time, reward->asset, reward->amount, reward->balance);
+    }
 
-    ofs.close();
+    fclose(fd);
     return 0;
 }
 
 
 
-int main()
-{
-    if(!checkConfig())
+int main() {
+    if(!checkConfig()){
         return -1;
+    }
 
     //Get Resources
-    std::string apiKey = getKrakenApiKey();
-    std::string secretKey = getKrakenSecretKey();
-    std::vector<std::string> currencyList = getCurrencies();
+    char* apiKey = getKrakenApiKey();
+    char* secretKey = getKrakenSecretKey();
+    forward_list<char*> currencyList = getCurrencies();
 
-    for(std::string const& currency : currencyList)
-    {
-        std::string lastLedgerID = getLastLedgerIDFromRecords(currency);
-        std::vector<Reward> newRewards = getRewards(lastLedgerID, currency, apiKey, secretKey);
+    for(char* currency : currencyList){
+        char* lastLedgerID = getLastLedgerIDFromRecords(currency);
+        std::forward_list<Reward*> newRewards = getRewards(lastLedgerID, currency, apiKey, secretKey);
         writeRewardsToFile(newRewards, currency);
 
-        std::cout << "Got " << newRewards.size() << " new " << currency << " rewards!" << std::endl;
+        printf("Got %ld new %s rewards!\n", std::distance(newRewards.begin(), newRewards.end()), currency);
+
+        //Free/Delete Resources
+        if(lastLedgerID != nullptr){
+            free(lastLedgerID);
+        }
+        for(Reward* reward : newRewards){
+            delete reward;
+        }
+        free(currency);
     }
+
+    free(apiKey);
+    free(secretKey);
 
     return 0;
 }
