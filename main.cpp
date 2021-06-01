@@ -1,10 +1,10 @@
 #include <chrono>
 #include <string>
-#include <vector>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <ctime>
+#include <forward_list>
 
 #include "external/rapidjson/document.h"
 #include "external/rapidjson/rapidjson.h"
@@ -41,9 +41,9 @@ bool checkConfig(){
  * Schreibt alle Währungen aus der currencies.txt in eine forward_list
  * @return
  */
-std::vector<std::string> getCurrencies()
+std::forward_list<std::string> getCurrencies()
 {
-    std::vector<std::string> currenciesList;
+    std::forward_list<std::string> currenciesList;
     std::ifstream ifs("currencies.txt", std::ios::in);
 
     if (!ifs.is_open())
@@ -53,9 +53,9 @@ std::vector<std::string> getCurrencies()
     }
 
     std::string line;
-
-    while (std::getline(ifs, line))
-        currenciesList.push_back(line);
+    while (std::getline(ifs, line)){
+        currenciesList.push_front(line);
+    }
 
     ifs.close();
 
@@ -101,7 +101,7 @@ std::filesystem::path createFileNameOutOfCurrency(std::string const& currency)
  * Erstellt die CSV-Datei welche die Transaktionen enthalten soll
  * @return Fehlercode
  */
-int createCSVFile(std::filesystem::path currencyPath)
+int createCSVFile(const std::filesystem::path& currencyPath)
 {
     std::ofstream ofs(currencyPath, std::ios::out);
 
@@ -112,6 +112,7 @@ int createCSVFile(std::filesystem::path currencyPath)
     }
 
     ofs << "LedgerID; Timestamp; Asset; Amount; Balance" << '\n';
+    //ofs.write("LedgerID; Timestamp; Asset; Amount; Balance\n", 45);
     ofs.close();
     return 0;
 }
@@ -155,7 +156,7 @@ std::string getLastLedgerIDFromRecords(std::string const& currency)
  * @param secret_key Kraken Secret Key
  * @return Liste mit neuen Rewards
  */
-std::vector<Reward> getRewards(std::string const& lastLedgerID, std::string const& currency, std::string const& api_key, std::string const& secret_key)
+std::forward_list<Reward> getRewards(std::string const& lastLedgerID, std::string const& currency, std::string const& api_key, std::string const& secret_key)
 {
     struct kraken_api *kr_api = nullptr;
 
@@ -165,7 +166,7 @@ std::vector<Reward> getRewards(std::string const& lastLedgerID, std::string cons
     kraken_set_opt(&kr_api, "asset", currency.data());
     kraken_set_opt(&kr_api, "type", "staking");
 
-    if(lastLedgerID != "")
+    if(!lastLedgerID.empty())
     {
         kraken_set_opt(&kr_api, "start", lastLedgerID.data());
     }
@@ -176,7 +177,7 @@ std::vector<Reward> getRewards(std::string const& lastLedgerID, std::string cons
     //Ergebnis überprüfen
     if(kr_api->s_result == nullptr){
         std::cout << "Error when calling Kraken API" << std::endl;
-        return std::vector<Reward>();
+        return std::forward_list<Reward>();
     }
 
     //Get Krakenresult and clean krakenapi
@@ -192,24 +193,24 @@ std::vector<Reward> getRewards(std::string const& lastLedgerID, std::string cons
     if (!doc.HasMember("result"))
     {
         std::cout  << "JSON has no member 'result'!" << std::endl;
-        return std::vector<Reward>();
+        return std::forward_list<Reward>();
     }
     if (!doc.HasMember("error"))
     {
         std::cout << "JSON has no member 'error'!" << std::endl;
-        return std::vector<Reward>();
+        return std::forward_list<Reward>();
     }
     if(!doc["error"].GetArray().Empty())
     {
         std::cout << "An error occured! " << '\n' << "JSON: " << json << std::endl;
-        return std::vector<Reward>();
+        return std::forward_list<Reward>();
     }
 
     //JSON verarbeiten
     rapidjson::GenericObject result = doc["result"].GetObject();
     rapidjson::GenericObject ledger = result["ledger"].GetObject();
 
-    std::vector<Reward> rewardList;
+    std::forward_list<Reward> rewardList;
 
     for(auto const& entry : ledger){
         rapidjson::GenericObject body = entry.value.GetObject();
@@ -223,23 +224,29 @@ std::vector<Reward> getRewards(std::string const& lastLedgerID, std::string cons
         reward.balance = body["balance"].GetString();
 
         std::string timeString;
+        timeString.resize(20);
         const time_t time = body["time"].GetDouble();
         tm* tmo = gmtime(&time);
         strftime(timeString.data(), 20*sizeof(char), "%Y-%m-%dT%H:%M:%S", tmo);
+
+        //Wir müssen den C-String-Terminator abhacken
+        timeString.resize(19);
+
         reward.time = timeString;
 
-        rewardList.push_back(reward);
+
+        rewardList.push_front(reward);
     }
 
     return rewardList;
 }
 
 
-int writeRewardsToFile(std::vector<Reward> const& rewardList, std::string const& currency)
+int writeRewardsToFile(std::forward_list<Reward> const& rewardList, std::string const& currency)
 {
     std::filesystem::path filename = createFileNameOutOfCurrency(currency);
 
-    std::ofstream ofs(filename, std::ios::out);
+    std::ofstream ofs(filename, std::ios::app);
 
     if (!ofs.is_open())
     {
@@ -247,8 +254,9 @@ int writeRewardsToFile(std::vector<Reward> const& rewardList, std::string const&
         return -1;
     }
 
-    for(auto const& reward : rewardList)
+    for(auto const& reward : rewardList){
         ofs << reward.ledgerId << ";" << reward.time << ";" << reward.asset << ";" << reward.amount << ";" << reward.balance << '\n';
+    }
 
     ofs.close();
     return 0;
@@ -258,21 +266,22 @@ int writeRewardsToFile(std::vector<Reward> const& rewardList, std::string const&
 
 int main()
 {
-    if(!checkConfig())
+    if(!checkConfig()){
         return -1;
+    }
 
     //Get Resources
     std::string apiKey = getKrakenApiKey();
     std::string secretKey = getKrakenSecretKey();
-    std::vector<std::string> currencyList = getCurrencies();
+    std::forward_list<std::string> currencyList = getCurrencies();
 
     for(std::string const& currency : currencyList)
     {
         std::string lastLedgerID = getLastLedgerIDFromRecords(currency);
-        std::vector<Reward> newRewards = getRewards(lastLedgerID, currency, apiKey, secretKey);
+        std::forward_list<Reward> newRewards = getRewards(lastLedgerID, currency, apiKey, secretKey);
         writeRewardsToFile(newRewards, currency);
 
-        std::cout << "Got " << newRewards.size() << " new " << currency << " rewards!" << std::endl;
+        std::cout << "Got " << std::distance(newRewards.begin(), newRewards.end()) << " new " << currency << " rewards!" << std::endl;
     }
 
     return 0;
