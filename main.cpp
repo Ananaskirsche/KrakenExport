@@ -12,84 +12,13 @@
 #include "Reward.hpp"
 #include "Exporter.hpp"
 #include "CsvExporter.hpp"
+#include "Configuration.hpp"
 
 extern "C"
 {
     #include "external/libkraken/kraken_api.h"
 }
 
-
-/**
- * Prüft, ob die kraken.key und currencies.txt existieren
- * @return
- */
-bool checkConfig(){
-    if(!std::filesystem::exists("kraken.key"))
-    {
-        printf("kraken.key does not exist!\n");
-        return false;
-    }
-
-    if(!std::filesystem::exists("currencies.txt"))
-    {
-        printf("currencies.txt does not exist!\n");
-        return false;
-    }
-
-    return true;
-}
-
-/**
- * Schreibt alle Währungen aus der currencies.txt in eine forward_list
- * @return
- */
-std::forward_list<std::string> getCurrencies()
-{
-    std::forward_list<std::string> currenciesList;
-    std::ifstream ifs("currencies.txt", std::ios::in);
-
-    if (!ifs.is_open())
-    {
-        std::cout << "Could not open currencies.txt" << std::endl;
-        return currenciesList;
-    }
-
-    std::string line;
-    while (std::getline(ifs, line)){
-        currenciesList.push_front(line);
-    }
-
-    ifs.close();
-
-    return currenciesList;
-}
-
-/**
- * Holt den API-Key aus der kraken.key Datei
- * @return API-Key
- */
-std::string getKrakenApiKey()
-{
-    std::ifstream ifs("kraken.key", std::ios::in);
-    std::string key;
-    std::getline(ifs, key);
-    ifs.close();
-    return key;
-}
-
-/**
- * Holt den Secret-Key aus der kraken.key Datei
- * @return Secret Key
- */
-std::string getKrakenSecretKey()
-{
-    std::ifstream ifs("kraken.key", std::ios::in);
-    std::string key;
-    std::getline(ifs, key);
-    std::getline(ifs, key);
-    ifs.close();
-    return key;
-}
 
 
 /**
@@ -189,24 +118,24 @@ std::forward_list<Reward> getRewards(std::string const& lastLedgerID, std::strin
 
 int main()
 {
-    if(!checkConfig()){
-        return -1;
+    try{
+        Configuration c{"config.txt"};
+
+        Exporter* exp = new CsvExporter();
+
+        for(std::string const& currency : c.getCurrencies())
+        {
+            std::string lastLedgerID = exp->getLastLedgerID(currency);
+            std::forward_list<Reward> newRewards = getRewards(lastLedgerID, currency, c.getKrakenApiKey(), c.getKrakenSecretKey());
+            exp->exportRewards(currency, newRewards);
+
+            std::cout << "Got " << std::distance(newRewards.begin(), newRewards.end()) << " new " << currency << " rewards!" << std::endl;
+        }
+
+        delete exp;
     }
-
-    //Get Resources
-    std::string apiKey = getKrakenApiKey();
-    std::string secretKey = getKrakenSecretKey();
-    std::forward_list<std::string> currencyList = getCurrencies();
-
-    Exporter* exp = new CsvExporter();
-
-    for(std::string const& currency : currencyList)
-    {
-        std::string lastLedgerID = exp->getLastLedgerID(currency);
-        std::forward_list<Reward> newRewards = getRewards(lastLedgerID, currency, apiKey, secretKey);
-        exp->exportRewards(currency, newRewards);
-
-        std::cout << "Got " << std::distance(newRewards.begin(), newRewards.end()) << " new " << currency << " rewards!" << std::endl;
+    catch(const std::invalid_argument& e){
+        std::cerr << "ERROR: " << e.what() << std::endl;
     }
 
     return 0;

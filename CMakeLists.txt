@@ -43,11 +43,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
 set(OPENSSL_USE_STATIC_LIBS TRUE)
 
-add_executable(KrakenExport Exporter.hpp Reward.hpp CsvExporter.cpp CsvExporter.hpp main.cpp )
+add_executable(KrakenExport Exporter.hpp Reward.hpp CsvExporter.cpp CsvExporter.hpp main.cpp Configuration.cpp Configuration.hpp)
 target_link_libraries(KrakenExport ${CMAKE_SOURCE_DIR}/external/libkraken/libkraken.a)
 target_link_libraries(KrakenExport OpenSSL::Crypto)
 
-configure_file("kraken.key" "kraken.key" COPYONLY)
-configure_file("currencies.txt" "currencies.txt" COPYONLY)
+configure_file("config.txt" "config.txt" COPYONLY)
 
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")

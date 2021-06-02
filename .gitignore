@@ -83,7 +83,6 @@ cmake-build-release
 *.kdev4
 
 #File which contains API key for Kraken
-kraken.key
-currencies.txt
+config.txt
 
 external
