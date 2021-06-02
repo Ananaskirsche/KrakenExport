@@ -10,6 +10,8 @@
 #include "external/rapidjson/rapidjson.h"
 
 #include "Reward.hpp"
+#include "Exporter.hpp"
+#include "CsvExporter.hpp"
 
 extern "C"
 {
@@ -87,64 +89,6 @@ std::string getKrakenSecretKey()
     std::getline(ifs, key);
     ifs.close();
     return key;
-}
-
-std::filesystem::path createFileNameOutOfCurrency(std::string const& currency)
-{
-    std::string filename = "staking_rewards_";
-    filename.append(currency);
-    filename.append(".csv");
-    return filename;
-}
-
-/**
- * Erstellt die CSV-Datei welche die Transaktionen enthalten soll
- * @return Fehlercode
- */
-int createCSVFile(const std::filesystem::path& currencyPath)
-{
-    std::ofstream ofs(currencyPath, std::ios::out);
-
-    if (!ofs.is_open())
-    {
-        std::cout << "Could not create file " << currencyPath.string() << std::endl;
-        return -1;
-    }
-
-    ofs << "LedgerID; Timestamp; Asset; Amount; Balance" << '\n';
-    //ofs.write("LedgerID; Timestamp; Asset; Amount; Balance\n", 45);
-    ofs.close();
-    return 0;
-}
-
-std::string getLastLedgerIDFromRecords(std::string const& currency)
-{
-    std::filesystem::path filename = createFileNameOutOfCurrency(currency);
-
-    if(!exists(filename))
-    {
-        createCSVFile(filename);
-        return {};
-    }
-
-    std::ifstream ifs(filename, std::ios::in);
-
-    if (!ifs.is_open())
-    {
-        std::cout << "Could not open " << filename.string() << std::endl;
-        return {};
-    }
-
-    std::string lastLedger;
-    std::string ledgerId, timestamp, asset, amount, balance;
-
-    while (ifs >> ledgerId >> timestamp >> asset >> amount >> balance)
-        lastLedger = ledgerId;
-
-    ifs.close();
-
-    lastLedger.substr(0, lastLedger.size() - 1);
-    return lastLedger;
 }
 
 
@@ -242,27 +186,6 @@ std::forward_list<Reward> getRewards(std::string const& lastLedgerID, std::strin
 }
 
 
-int writeRewardsToFile(std::forward_list<Reward> const& rewardList, std::string const& currency)
-{
-    std::filesystem::path filename = createFileNameOutOfCurrency(currency);
-
-    std::ofstream ofs(filename, std::ios::app);
-
-    if (!ofs.is_open())
-    {
-        std::cout << "Could not open " << filename.string() << std::endl;
-        return -1;
-    }
-
-    for(auto const& reward : rewardList){
-        ofs << reward.ledgerId << ";" << reward.time << ";" << reward.asset << ";" << reward.amount << ";" << reward.balance << '\n';
-    }
-
-    ofs.close();
-    return 0;
-}
-
-
 
 int main()
 {
@@ -275,11 +198,13 @@ int main()
     std::string secretKey = getKrakenSecretKey();
     std::forward_list<std::string> currencyList = getCurrencies();
 
+    Exporter* exp = new CsvExporter();
+
     for(std::string const& currency : currencyList)
     {
-        std::string lastLedgerID = getLastLedgerIDFromRecords(currency);
+        std::string lastLedgerID = exp->getLastLedgerID(currency);
         std::forward_list<Reward> newRewards = getRewards(lastLedgerID, currency, apiKey, secretKey);
-        writeRewardsToFile(newRewards, currency);
+        exp->exportRewards(currency, newRewards);
 
         std::cout << "Got " << std::distance(newRewards.begin(), newRewards.end()) << " new " << currency << " rewards!" << std::endl;
     }

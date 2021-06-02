@@ -84,3 +84,6 @@ cmake-build-release
 
 #File which contains API key for Kraken
 kraken.key
+currencies.txt
+
+external
