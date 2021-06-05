@@ -5,7 +5,6 @@
 #ifndef KRAKENEXPORT_CONFIGURATION_HPP
 #define KRAKENEXPORT_CONFIGURATION_HPP
 
-
 #include <filesystem>
 #include <forward_list>
 
@@ -15,8 +14,6 @@ private:
     std::string krakenApiKey;
     std::string krakenSecretKey;
     std::forward_list<std::string> currencies;
-
-
 
 public:
     explicit Configuration(const std::filesystem::path& filePath);

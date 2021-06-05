@@ -65,7 +65,8 @@ std::forward_list<Reward> getRewards(std::string const& lastLedgerID, std::strin
     //JSON überprüfen
     if (!doc.HasMember("result"))
     {
-        std::cout  << "JSON has no member 'result'!" << std::endl;
+        // Wir brauchen das nicht ausgeben, da 'result' fehlt, wenn es keine neuen Stakes gibt
+        //std::cout  << "JSON has no member 'result'!" << std::endl;
         return std::forward_list<Reward>();
     }
     if (!doc.HasMember("error"))
@@ -104,9 +105,7 @@ std::forward_list<Reward> getRewards(std::string const& lastLedgerID, std::strin
 
         //Wir müssen den C-String-Terminator abhacken
         timeString.resize(19);
-
         reward.time = timeString;
-
 
         rewardList.push_front(reward);
     }
@@ -121,7 +120,7 @@ int main()
     try{
         Configuration c{"config.txt"};
 
-        Exporter* exp = new CsvExporter();
+        std::unique_ptr<Exporter> exp = std::make_unique<CsvExporter>();
 
         for(std::string const& currency : c.getCurrencies())
         {
@@ -131,8 +130,6 @@ int main()
 
             std::cout << "Got " << std::distance(newRewards.begin(), newRewards.end()) << " new " << currency << " rewards!" << std::endl;
         }
-
-        delete exp;
     }
     catch(const std::invalid_argument& e){
         std::cerr << "ERROR: " << e.what() << std::endl;
